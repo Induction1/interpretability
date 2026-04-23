@@ -1,0 +1,15 @@
+[project]
+name = "turpin-unfaithful-cot-replication"
+version = "0.1.0"
+description = "Default template for PDM package"
+authors = [
+    {name = "Michael Gao", email = "mgao31415@gmail.com"},
+]
+dependencies = ["datasets>=4.8.4", "python-dotenv>=1.2.2", "tqdm>=4.67.3", "matplotlib>=3.10.8", "numpy>=2.4.4", "anthropic>=0.96.0", "jupyter>=1.1.1"]
+requires-python = "==3.11.*"
+readme = "README.md"
+license = {text = "MIT"}
+
+
+[tool.pdm]
+distribution = false

@@ -1,0 +1,26 @@
+.env
+
+# Local agent / partner notes (not part of the public replication bundle).
+AGENTS.md
+
+# Full Turpin repo clone (optional local reference); committed copy lives under data/bbh/.
+upstream/
+
+# API run cache (large); remove this line if you want to commit raw completions.
+results/
+
+# PDM-managed virtualenv (machine-local; use `pdm install` after clone).
+.venv/
+.pdm-python
+
+# Python / Jupyter noise
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+
+# Local copy of the paper (use arXiv link in README).
+turpin.pdf
