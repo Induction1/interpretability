@@ -1,0 +1,21 @@
+I'm continuing a mech interp research project on CoT repair mechanisms in distilled reasoning models. This is a fresh chat — the prior chat did a deep lit review (actually reading the PDFs) and significantly updated the project framing. Everything is captured in:
+
+- /Users/michael/Documents/GitHub/interpretability/cot-edit-resistance/README.md ← comprehensive project state, paper summaries with methodology details, updated experimental plan, honest assessment
+- /Users/michael/Documents/GitHub/mechinterp/CLAUDE.md ← my background, preferences, curriculum context — read this carefully, it's load-bearing
+
+Before anything else: read both files in full. The README has been rewritten and contains a lot that matters. The CLAUDE.md tells you who I am and how to calibrate.
+
+**State of the project:**
+- Deep lit review is done (Zhang 2025, Wenkai Li 2026, Ye 2026, Bogdan 2025, Boppana 2026 all read in full)
+- The H1/H2/H3 hypothesis framing from before has been retired — it was overconfident about what's achievable
+- The new plan is: phenomenology first (does repair exist at 1.5B?), then mechanism only if the phenomenon is strong enough
+- Phase 0 is the immediate next step: set up infrastructure and run the kill criterion check
+
+**What I want from you to start:**
+Confirm you've read both files by summarizing in 3-4 sentences: (a) what Phase 0 is and what the kill criterion is, (b) what the cleanest white-box experiment is if Phase 0 passes, (c) one honest risk you see in the plan. Then we'll talk about whether to start coding.
+
+**Constraints:**
+- Don't re-run the lit search. The README summarizes the five key papers with sufficient detail. PDFs in papers/ are reference only — don't read them unless I ask.
+- Don't start coding until I confirm. Talk through the infrastructure plan first.
+- Flag any concerns about the project direction before we write code. Better to discuss now than after 3 days of work.
+- Token economy: no large reads or agent spawns without asking.
