@@ -1,21 +1,36 @@
-I'm continuing a mech interp research project on CoT repair mechanisms in distilled reasoning models. This is a fresh chat — the prior chat did a deep lit review (actually reading the PDFs) and significantly updated the project framing. Everything is captured in:
+I'm continuing a mechanistic interpretability research project on CoT repair in distilled reasoning models. Fresh chat — read these files before anything else:
 
-- /Users/michael/Documents/GitHub/interpretability/cot-edit-resistance/README.md ← comprehensive project state, paper summaries with methodology details, updated experimental plan, honest assessment
-- /Users/michael/Documents/GitHub/mechinterp/CLAUDE.md ← my background, preferences, curriculum context — read this carefully, it's load-bearing
-
-Before anything else: read both files in full. The README has been rewritten and contains a lot that matters. The CLAUDE.md tells you who I am and how to calibrate.
+- /Users/michael/Documents/GitHub/interpretability/cot-edit-resistance/README.md
+- /Users/michael/Documents/GitHub/interpretability/cot-edit-resistance/EXPERIMENTS.md
+- /Users/michael/Documents/GitHub/mechinterp/CLAUDE.md
 
 **State of the project:**
-- Deep lit review is done (Zhang 2025, Wenkai Li 2026, Ye 2026, Bogdan 2025, Boppana 2026 all read in full)
-- The H1/H2/H3 hypothesis framing from before has been retired — it was overconfident about what's achievable
-- The new plan is: phenomenology first (does repair exist at 1.5B?), then mechanism only if the phenomenon is strong enough
-- Phase 0 is the immediate next step: set up infrastructure and run the kill criterion check
 
-**What I want from you to start:**
-Confirm you've read both files by summarizing in 3-4 sentences: (a) what Phase 0 is and what the kill criterion is, (b) what the cleanest white-box experiment is if Phase 0 passes, (c) one honest risk you see in the plan. Then we'll talk about whether to start coding.
+We have a working behavioral result. Experiment 1 injected a fake "Final Answer: 0" at the 30% mark of correct MATH-500 level 3 reasoning traces on DeepSeek-R1-Distill-Qwen-1.5B. Result: 49% repair rate, 49% accepted fake, 94.5% explicit backtracking. The model almost always notices the injection is wrong but only escapes the repetition loop half the time.
+
+The failure mode: the model correctly states the right answer in its reasoning, then references the injected fake answer, then cycles between the two until hitting the token limit. It knows the right answer but can't override the surface text.
+
+**What's next:**
+
+Experiment 2: white-box analysis. We want to run logit lens on the post-injection window to ask: does the correct answer stay represented in the residual stream during the repetition loop in non-repair cases? If yes, something is preventing it from reaching the surface — that's the mechanistic finding.
+
+Concretely:
+- Use forward hooks on `model.model.layers[i]` to collect residual stream activations at each layer
+- Project through the unembedding matrix (logit lens) to get per-layer token probabilities
+- Focus on layers 12-20 (Zhang 2025 found these are the Reasoning-Focus Heads in R1-Qwen-1.5B)
+- Compare repair vs. non-repair cases: does the correct answer token probability differ at these layers during the post-injection window?
+
+**Technical setup:**
+- Repo: /Users/michael/Documents/GitHub/interpretability/cot-edit-resistance/
+- Model: DeepSeek-R1-Distill-Qwen-1.5B, fp16
+- RunPod RTX 5090 for compute (push/pull via git to sync)
+- PDM venv, `import torch as t` convention
+- Do NOT use TransformerLens (Qwen2.5 not supported)
+- Use raw HF hooks: `model.model.layers[i].register_forward_hook(fn)`
+- Data: data/experiment1_results.json has all 55 injection results with full traces
 
 **Constraints:**
-- Don't re-run the lit search. The README summarizes the five key papers with sufficient detail. PDFs in papers/ are reference only — don't read them unless I ask.
-- Don't start coding until I confirm. Talk through the infrastructure plan first.
-- Flag any concerns about the project direction before we write code. Better to discuss now than after 3 days of work.
-- Token economy: no large reads or agent spawns without asking.
+- Don't start coding until we've talked through the experiment design
+- Don't re-run the lit search — README and EXPERIMENTS.md have what we need
+- Token budget: no large reads or agent spawns without asking
+- Check CLAUDE.md for my background and preferences

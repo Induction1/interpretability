@@ -1,0 +1,22 @@
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pdm-python
+*.egg-info/
+
+# jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# os
+.DS_Store
+
+# large files / cached model weights
+*.bin
+*.safetensors
+*.gguf
+
+# env
+.env

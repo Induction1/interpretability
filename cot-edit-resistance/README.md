@@ -4,47 +4,58 @@
 
 ## Research Question
 
-When a reasoning model's chain-of-thought is corrupted mid-generation — by token-forcing a wrong continuation — does the model repair back to its original answer upon regeneration? And what is happening internally that causes (or prevents) that repair?
+When a reasoning model's chain-of-thought is corrupted mid-generation — by injecting a fake final answer — does the model repair back to its original answer? And what is happening internally that causes (or prevents) that repair?
 
-This is an open question from Neel Nanda's research problems doc. Nobody has done the token-forcing + regeneration experiment with activation-level analysis on a distilled reasoning model.
+This is an open question from Neel Nanda's research problems doc. Nobody has done the truncate-and-prepend + regeneration experiment with activation-level analysis on a distilled reasoning model.
+
+## Key Result (Experiment 1)
+
+We injected a fake `\boxed{0}` conclusion at the 30% mark of correct reasoning traces on MATH-500 level 3. DeepSeek-R1-Distill-Qwen-1.5B:
+
+- **Repaired to correct answer: 49.1%**
+- **Accepted fake answer: 49.1%**
+- **Explicitly backtracked ("wait", "actually"): 94.5%**
+
+The model almost always notices the injection is wrong. But it only escapes half the time. The failure mode is a repetition loop — the model correctly states the right answer, then references the injected text, then cycles between the two until it hits the token limit.
 
 ## The Experiment
 
-**Dataset:** GPQA-Diamond (198 graduate-level science questions). We use this because Boppana 2026 confirmed that R1-Distill-1.5B builds its answer gradually on hard questions rather than knowing from token 1 — which means "repair" is a real phenomenon, not just a strong prior surviving noise.
+**Dataset:** MATH-500 level 3 (105 problems, 55 correct baseline traces).
 
-**Model:** DeepSeek-R1-Distill-Qwen-1.5B, fp16, MPS.
+**Model:** DeepSeek-R1-Distill-Qwen-1.5B, fp16, CUDA.
 
-### Step 1 — Baseline (Phase 0, current)
-Run the model on all GPQA-Diamond questions. Save full traces. Keep only the ones the model gets right — these are our experimental cases.
+**Injection method (truncate-and-prepend):**
+1. Take the model's own correct reasoning trace
+2. Cut at nearest sentence boundary to the 30% character mark
+3. Append a fake conclusion in the model's natural format (`So, I think the answer is 0. **Final Answer** \boxed{0}`)
+4. Feed full sequence back, generate continuation (greedy, temp=0)
+5. Measure repair rate and explicit backtracking
 
-### Step 2 — Inject and measure repair (Phase 1)
-For each correct trace, token-force a wrong continuation at some point mid-reasoning, then let the model regenerate freely. Measure: does it recover the correct answer?
+This is a generation-time intervention, not prompt-level editing. The model cannot distinguish the prefix from tokens it generated itself.
 
-Token-forcing means using a custom `LogitsProcessor` to override the model's output distribution at specific positions — not prompt editing, not greedy tricks. This is a genuine generation-time intervention.
+## What's Next
 
-### Step 3 — White-box analysis (Phase 2)
-If repair exists, look at what's happening internally. Details TBD based on what the data shows. Starting point: Zhang 2025 identified Reasoning-Focus Heads in layers 12-20 of R1-Qwen-1.5B — that's where to look first.
+White-box analysis: logit lens at layers 12-20 during the post-injection window. Does the correct answer stay represented in the residual stream in non-repair cases? What determines whether the model escapes the loop?
 
-## Key Prior Work
-
-**Zhang 2025** — Attention analysis of R1-Qwen-1.5B. Found Reasoning-Focus Heads (layers 12-20) that carry reasoning content to answer tokens. Did residual stream patching on a synthetic task. Did not study regeneration.
-
-**Boppana 2026** — Showed R1-Distill-1.5B does genuine reasoning on hard tasks (answer builds gradually). Easy tasks: answer committed from token 1. This is why we use GPQA-Diamond.
-
-**Lanham 2023** — Behavioral mistake injection at the prompt level. Showed edits don't always change the answer. Did not use token-forcing or look at mechanisms.
-
-## Kill Criterion
-
-Repair rate < 20% on GPQA-Diamond → phenomenon too weak at 1.5B. Fallback: rent an A100, run on R1-Distill-7B.
+See `EXPERIMENTS.md` for the full experiment log.
 
 ## File Structure
 
 ```
 experiments/
-  phase0_baseline.py      — generate and save baseline traces
-  phase1_injection.py     — token-forcing + repair measurement
-  phase2_activations.py   — white-box analysis
+  experiment0.py    — baseline traces on MATH-500 level 3
+  experiment1.py    — fake final answer injection, repair measurement
+  experiment2.py    — white-box: logit lens on repair vs. non-repair cases (TODO)
 data/
   baseline_traces.json
-  repair_results.json
+  experiment1_results.json
+papers/             — reference PDFs
 ```
+
+## Prior Work
+
+**Zhang 2025** — Attention analysis of R1-Qwen-1.5B. Found Reasoning-Focus Heads (layers 12-20). Did residual stream patching on synthetic tasks. Did not study regeneration.
+
+**Boppana 2026** — Showed R1-Distill-1.5B does genuine reasoning on hard tasks. Motivated use of MATH over GPQA-Diamond (too hard for 1.5B).
+
+**Lanham 2023** — Prompt-level mistake injection. Showed edits don't always change answers. Did not use generation-time intervention or look at mechanisms.
