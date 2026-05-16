@@ -18,7 +18,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
 # ── config ───────────────────────────────────────────────────────────────────
 MODEL_NAME = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
-DEVICE = "mps"
+DEVICE = "cuda" if t.cuda.is_available() else "mps" if t.backends.mps.is_available() else "cpu"
 MAX_NEW_TOKENS = 4096
 LIMIT = 1  # set to None to run all level-3 problems
 OUTPUT_PATH = Path("data/baseline_traces.json")
