@@ -30,7 +30,7 @@ MODEL_NAME = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 MAX_NEW_TOKENS = 1024
 INJECTION_DEPTHS = [0.10, 0.70]
 INJECTION_TYPES = ["absurd", "correct"]
-POOL_SIZE = 5
+POOL_SIZE = 55
 
 EXPERIMENT1_PATH = Path("data/experiment1_results.json")
 BASELINE_PATH = Path("data/baseline_traces.json")
