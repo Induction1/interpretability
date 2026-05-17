@@ -27,10 +27,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
 DEVICE = "cuda" if t.cuda.is_available() else "mps" if t.backends.mps.is_available() else "cpu"
 MODEL_NAME = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
-MAX_NEW_TOKENS = 4096
-INJECTION_DEPTHS = [0.10, 0.30, 0.70]
+MAX_NEW_TOKENS = 1024
+INJECTION_DEPTHS = [0.10, 0.70]
 INJECTION_TYPES = ["absurd", "correct"]
-POOL_SIZE = 20
+POOL_SIZE = 5
 
 EXPERIMENT1_PATH = Path("data/experiment1_results.json")
 BASELINE_PATH = Path("data/baseline_traces.json")
