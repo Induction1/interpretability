@@ -24,7 +24,7 @@ DEVICE = "cuda" if t.cuda.is_available() else "mps" if t.backends.mps.is_availab
 MODEL_NAME  = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 OUTPUT_PATH = Path("data/experiment3_results.json")
 DEPTHS      = [round(i / 10, 1) for i in range(1, 10)]
-POOL_SIZE   = 3   # set to 55 for full run
+POOL_SIZE   = 55
 PROBE_TOKENS = 30
 
 # Ends with \boxed{ so the model is forced to complete inside the box.
@@ -115,18 +115,10 @@ for idx in pool_indices:
         boundary = find_sentence_boundary(thinking, int(len(thinking) * depth))
         prefix_text = thinking[:boundary]
 
-        reasoning_prefix_ids = tokenizer.encode(
-            prefix_text, add_special_tokens=False, return_tensors="pt"
+        prefix_ids = tokenizer.encode(
+            prefix_text + COMMITMENT_PROMPT, add_special_tokens=False, return_tensors="pt"
         ).to(DEVICE)
-        commit_prompt_ids = tokenizer.encode(
-            COMMITMENT_PROMPT, add_special_tokens=False, return_tensors="pt"
-        ).to(DEVICE)
-        prefix_ids = t.cat([reasoning_prefix_ids, commit_prompt_ids], dim=1)
         input_ids = t.cat([prompt_ids, prefix_ids], dim=1)
-
-        # logit lens at the last token of the reasoning prefix (before commitment prompt)
-        # this position encodes "what the model knows after reasoning up to this depth"
-        last_reasoning_pos = prompt_ids.shape[1] + reasoning_prefix_ids.shape[1] - 1
 
         # --- logit lens ---
         with t.no_grad():
@@ -134,7 +126,7 @@ for idx in pool_indices:
 
         layers_out = []
         for li in range(n_layers):
-            h = fwd.hidden_states[li + 1][:, last_reasoning_pos, :]
+            h = fwd.hidden_states[li + 1][:, -1, :]
             logits = model.lm_head(model.model.norm(h))
             probs = t.softmax(logits, dim=-1)[0]
             correct_prob = float(probs[answer_token_id].item())

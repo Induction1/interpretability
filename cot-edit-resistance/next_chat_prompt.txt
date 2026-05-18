@@ -36,12 +36,18 @@ Pilot finding (3 problems):
 - idx=2 (perfect cube, gt=27): correct from depth 0.2 onwards, wrong at 0.1.
 - idx=0 (\frac{14}{3}): broken ground truth in stored data (truncated to \frac{14}).
 
-Key fix applied this session: changed logit lens position from last token of input (last token of commitment prompt) to last token of the reasoning prefix. The `{` token of `$\boxed{` was giving inconsistent results because it's sensitive to what immediately precedes it.
+Logit lens position: [:, -1, :] — the last token of the full input (the `{` of `$\boxed{`). This is correct. The model has seen problem + reasoning prefix + commitment prompt, so the residual stream at this position is predicting what goes inside the box. That's the mechanistic question. Do NOT change this to the last reasoning token — that position predicts the next reasoning word, not the answer, so it shows near-zero for the answer token.
+
+Pilot findings (3 problems, pre-confirmed correct):
+- idx=1 (gt=9): layer 26 jumps from ~0% to 99.85% — correct at ALL depths, stable signal
+- idx=2 (gt=27): correct_prob ~0.05 at depth=0.1, then 0.85+ from depth=0.2 onward — genuine commitment threshold
+- idx=0 (gt=\frac{14}{3}): ground truth truncated to \frac{14} in stored data — broken, skip for analysis
 
 **Current state:**
-- experiment3.py is updated with the logit lens position fix. POOL_SIZE=3 for pilot.
-- Need to: wipe data/experiment3_results.json on RunPod, re-run pilot to verify the fix works, then scale to POOL_SIZE=55.
-- After that: analyze the logit lens curves — does the "commitment layer" (where correct answer probability jumps) shift with depth?
+- experiment3.py is correct (logit lens at [:, -1, :], POOL_SIZE=55)
+- The pilot results JSON (3 problems) is at the correct git commit (d6ee392 or similar) — restore it on RunPod to resume rather than re-running those 3 problems
+- Scale to full 55: restore old JSON, git pull, run — it will resume from where it left off
+- After full run: analyze whether the "commitment layer" (layer where correct_prob jumps) shifts with depth across all 55 problems
 
 **Technical setup:**
 - Repo: /Users/michael/Documents/GitHub/interpretability/cot-edit-resistance/
