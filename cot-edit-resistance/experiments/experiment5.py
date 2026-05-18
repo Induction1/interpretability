@@ -189,7 +189,7 @@ def generate_thinking(prompt_text):
     # also a clean version for parsing/printing
     full_text_clean = tokenizer.decode(gen_ids, skip_special_tokens=True)
 
-    think_content, response_content, has_think = _parse_think(full_text_raw)
+    think_content, response_content, has_think = _parse_think(full_text)
     think_token_count = len(tokenizer(think_content, add_special_tokens=False).input_ids) if has_think else 0
     refused = _is_refusal(response_content) if response_content else _is_refusal(full_text_clean)
 
