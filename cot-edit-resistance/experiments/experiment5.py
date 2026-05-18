@@ -64,7 +64,8 @@ else:
 
 MODEL_NAME     = "Qwen/Qwen3-8B"
 DEVICE         = "cuda"
-MAX_NEW_TOKENS = 512
+MAX_NEW_TOKENS = 350
+MAX_BEHAVIORS  = 150
 THINK_DEPTH    = 0.4
 OUTPUT_DIR     = Path("outputs/experiment5")
 DATA_DIR       = Path("data")
@@ -252,8 +253,8 @@ if FILTERED_PATH.exists():
     in_progress = cache.get("_in_progress", False)
     print(f"Loaded cache: kept={len(kept)}  scanned={len(done_indices)}  in_progress={in_progress}")
 
-if in_progress or len(done_indices) < len(behaviors):
-    for i, behavior in enumerate(behaviors):
+if in_progress or len(done_indices) < min(len(behaviors), MAX_BEHAVIORS):
+    for i, behavior in enumerate(behaviors[:MAX_BEHAVIORS]):
         if i in done_indices:
             continue
         try:
