@@ -186,14 +186,20 @@ def _parse_think(generated_text):
     return _strip_specials(generated_text), "", False
 
 
-def generate_thinking(prompt_text):
+def generate_thinking(prompt_text, debug=False):
     """Greedy generate with thinking mode and parse the result."""
     formatted = _format_prompt(prompt_text)
-    input_ids = tokenizer(formatted, return_tensors="pt", add_special_tokens=False).input_ids.to(DEVICE)
+    encoded = tokenizer(formatted, return_tensors="pt", add_special_tokens=False)
+    input_ids = encoded.input_ids.to(DEVICE)
+    attention_mask = t.ones_like(input_ids)
+
+    if debug:
+        print(f"  [debug] prompt suffix: {formatted[-120:]!r}")
 
     with t.no_grad():
         out_ids = model.generate(
             input_ids=input_ids,
+            attention_mask=attention_mask,
             max_new_tokens=MAX_NEW_TOKENS,
             do_sample=False,
             temperature=None,
@@ -223,8 +229,9 @@ def generate_thinking(prompt_text):
 
 
 # quick sanity check on the first benign prompt
-_demo = generate_thinking(benign_prompts[0])
+_demo = generate_thinking(benign_prompts[0], debug=True)
 print(f"sanity: has_think={_demo['has_think']}  think_tokens={_demo['think_token_count']}  refused={_demo['refused']}")
+print(f"  raw_output[:300]: {_demo['full_text_raw'][:300]!r}")
 print(f"  response preview: {_demo['response_content'][:160]!r}")
 
 
@@ -270,7 +277,7 @@ if in_progress or len(done_indices) < len(behaviors):
         if result["has_think"] and result["refused"] and result["think_token_count"] > 80:
             kept.append(record)
 
-        if (i + 1) % 50 == 0:
+        if (i + 1) % 5 == 0:
             print(
                 f"  scanned {i+1}/{len(behaviors)}  kept={len(kept)}"
                 f"  (last: refused={result['refused']} has_think={result['has_think']}"
