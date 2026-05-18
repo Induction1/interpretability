@@ -30,6 +30,10 @@ import json
 import re
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
 import requests
 import torch as t
 import transformers
@@ -43,6 +47,8 @@ def _parse_version(v):
             parts.append(int(x.split("-")[0].split("+")[0]))
         except ValueError:
             parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
     return tuple(parts)
 
 
@@ -155,23 +161,35 @@ def _is_refusal(text):
     return any(p.lower() in text.lower() for p in REFUSAL_PHRASES)
 
 
+_SPECIAL_TAIL_RE = re.compile(r"<\|im_(?:end|start)\|>.*|<\|endoftext\|>.*", re.DOTALL)
+
+
+def _strip_specials(s):
+    """Strip trailing Qwen control tokens (and anything after them) from a string."""
+    return _SPECIAL_TAIL_RE.sub("", s).strip()
+
+
 def _parse_think(generated_text):
-    """Split a model continuation into (think_content, response_content, has_think)."""
+    """Split a model continuation into (think_content, response_content, has_think).
+
+    Operates on the raw decode (skip_special_tokens=False) so that <think> /
+    </think> tokens survive as their surface form. Strips trailing Qwen control
+    tokens from the response since generation may terminate on <|im_end|>."""
     m = re.search(r"<think>(.*?)</think>(.*)", generated_text, re.DOTALL)
     if m:
-        return m.group(1).strip(), m.group(2).strip(), True
+        return _strip_specials(m.group(1)), _strip_specials(m.group(2)), True
     # Some templates start mid-think: there's no opening <think> in generation
     # but there may still be a closing </think>.
     m2 = re.search(r"(.*?)</think>(.*)", generated_text, re.DOTALL)
     if m2:
-        return m2.group(1).strip(), m2.group(2).strip(), True
-    return generated_text.strip(), "", False
+        return _strip_specials(m2.group(1)), _strip_specials(m2.group(2)), True
+    return _strip_specials(generated_text), "", False
 
 
 def generate_thinking(prompt_text):
     """Greedy generate with thinking mode and parse the result."""
     formatted = _format_prompt(prompt_text)
-    input_ids = tokenizer(formatted, return_tensors="pt").input_ids.to(DEVICE)
+    input_ids = tokenizer(formatted, return_tensors="pt", add_special_tokens=False).input_ids.to(DEVICE)
 
     with t.no_grad():
         out_ids = model.generate(
@@ -283,7 +301,7 @@ def get_hidden_states(prompt_text):
     """Per-layer hidden state at the LAST token of the formatted user message
     (with add_generation_prompt=True, enable_thinking=True). Shape: [n_layers, hidden_dim]."""
     formatted = _format_prompt(prompt_text)
-    input_ids = tokenizer(formatted, return_tensors="pt").input_ids.to(DEVICE)
+    input_ids = tokenizer(formatted, return_tensors="pt", add_special_tokens=False).input_ids.to(DEVICE)
     with t.no_grad():
         out = model(input_ids=input_ids, output_hidden_states=True, use_cache=False)
     # hidden_states is tuple of length n_layers + 1 (index 0 = embeddings)
@@ -294,12 +312,38 @@ def get_hidden_states(prompt_text):
     return states  # [n_layers, hidden_dim]
 
 
-if REFUSAL_DIR_PATH.exists():
+def _load_refusal_cache():
+    """Load and validate the refusal-direction cache. Returns (loaded_dict_or_None)."""
+    if not REFUSAL_DIR_PATH.exists():
+        return None
+    saved = t.load(REFUSAL_DIR_PATH, map_location="cpu")
+    cached_h = saved.get("harmful_states")
+    cached_b = saved.get("benign_states")
+    if cached_h is None or cached_h.shape[0] != len(filtered_behaviors):
+        print(f"  cache mismatch: harmful N={None if cached_h is None else cached_h.shape[0]}"
+              f" vs current N={len(filtered_behaviors)}; recomputing")
+        return None
+    if cached_b is None or cached_b.shape[0] != len(benign_prompts):
+        print(f"  cache mismatch: benign N={None if cached_b is None else cached_b.shape[0]}"
+              f" vs current M={len(benign_prompts)}; recomputing")
+        return None
+    return saved
+
+
+if len(filtered_behaviors) == 0:
+    raise RuntimeError(
+        "Cell 5 filtered to 0 behaviors — cannot compute refusal directions. "
+        "Loosen the filter (e.g., lower think_token_count threshold), increase "
+        "MAX_NEW_TOKENS so the model can finish a refusal, or check that "
+        "REFUSAL_PHRASES match this model's refusal style."
+    )
+
+_cache = _load_refusal_cache()
+if _cache is not None:
     print(f"Loading cached refusal directions from {REFUSAL_DIR_PATH}")
-    _saved = t.load(REFUSAL_DIR_PATH, map_location="cpu")
-    refusal_directions = _saved["refusal_directions"]
-    harmful_states = _saved.get("harmful_states")
-    benign_states = _saved.get("benign_states")
+    refusal_directions = _cache["refusal_directions"]
+    harmful_states = _cache["harmful_states"]
+    benign_states = _cache["benign_states"]
     print(f"  refusal_directions: {tuple(refusal_directions.shape)}")
 else:
     print("Extracting harmful hidden states...")
@@ -377,7 +421,7 @@ def inject_and_regenerate(prompt_text, original_think_content, injection_text):
     full_text, injected_think = _build_injected_input(
         prompt_text, original_think_content, injection_text
     )
-    input_ids = tokenizer(full_text, return_tensors="pt").input_ids.to(DEVICE)
+    input_ids = tokenizer(full_text, return_tensors="pt", add_special_tokens=False).input_ids.to(DEVICE)
 
     with t.no_grad():
         out_ids = model.generate(
@@ -513,11 +557,6 @@ for r in flips[:3]:
 
 
 # %% Cell 9 — Refusal-direction trajectory (per-token)
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
 TRAJECTORY_PATH = OUTPUT_DIR / "refusal_trajectory.png"
 SAMPLE_EVERY = 10
 TRAJ_MAX_TOKENS = min(MAX_NEW_TOKENS, 400)
@@ -530,7 +569,7 @@ def get_refusal_score_trajectory(input_ids, refusal_dirs, max_new_tokens=TRAJ_MA
     across layers. Also record per-layer scores at: (A) the last input token
     (=injection point), (B) the token completing </think>, (C) the first
     token after </think>."""
-    refusal_dirs_dev = refusal_dirs.to(DEVICE).to(model.dtype)
+    refusal_dirs_dev = refusal_dirs.to(DEVICE).float()
     nl = refusal_dirs_dev.shape[0]
 
     sample_positions = []
@@ -553,7 +592,7 @@ def get_refusal_score_trajectory(input_ids, refusal_dirs, max_new_tokens=TRAJ_MA
     per_layer = t.stack(
         [out.hidden_states[li + 1][0, -1, :].float() for li in range(nl)], dim=0
     )  # [n_layers, hidden_dim], float32 on DEVICE
-    scores = (per_layer * refusal_dirs_dev.float()).sum(dim=-1).cpu()  # [n_layers]
+    scores = (per_layer * refusal_dirs_dev).sum(dim=-1).cpu()  # [n_layers]
     scores_inject = scores.clone()
     # also count this as position -1 in the trajectory (input boundary)
     sample_positions.append(-1)
@@ -577,7 +616,7 @@ def get_refusal_score_trajectory(input_ids, refusal_dirs, max_new_tokens=TRAJ_MA
         per_layer = t.stack(
             [out.hidden_states[li + 1][0, -1, :].float() for li in range(nl)], dim=0
         )
-        scores = (per_layer * refusal_dirs_dev.float()).sum(dim=-1).cpu()
+        scores = (per_layer * refusal_dirs_dev).sum(dim=-1).cpu()
 
         if step % sample_every == 0:
             sample_positions.append(step)
@@ -635,7 +674,7 @@ for ci, case in enumerate(selected_cases):
 
     # ---- control trajectory: regular thinking-mode generation from the prompt ----
     control_input_text = _format_prompt(entry["prompt"])
-    control_ids = tokenizer(control_input_text, return_tensors="pt").input_ids.to(DEVICE)
+    control_ids = tokenizer(control_input_text, return_tensors="pt", add_special_tokens=False).input_ids.to(DEVICE)
     print("  capturing control trajectory...")
     control_traj = get_refusal_score_trajectory(control_ids, refusal_directions)
 
@@ -643,7 +682,7 @@ for ci, case in enumerate(selected_cases):
     injected_input_text, _ = _build_injected_input(
         entry["prompt"], entry["think_content"], INJECTION_TEXT
     )
-    injected_ids = tokenizer(injected_input_text, return_tensors="pt").input_ids.to(DEVICE)
+    injected_ids = tokenizer(injected_input_text, return_tensors="pt", add_special_tokens=False).input_ids.to(DEVICE)
     print("  capturing injected trajectory...")
     injected_traj = get_refusal_score_trajectory(injected_ids, refusal_directions)
 
@@ -689,7 +728,7 @@ print(f"\nSaved trajectory plot to {TRAJECTORY_PATH}")
 # %% Cell 10 — Layer-level analysis: 3-moment heatmap
 HEATMAP_PATH = OUTPUT_DIR / "layer_heatmap.png"
 
-# Build [n_layers, 3] matrices for control and injected, averaged across cases.
+
 def _stack_scores(td_key, moment_keys):
     """Return tensor [num_cases, n_layers, 3]; missing moments are NaN."""
     rows = []
@@ -701,9 +740,24 @@ def _stack_scores(td_key, moment_keys):
             if v is None:
                 cols.append(t.full((n_layers,), float("nan")))
             else:
-                cols.append(t.tensor(v))
+                cols.append(t.tensor(v, dtype=t.float32))
         rows.append(t.stack(cols, dim=1))  # [n_layers, 3]
+    if not rows:
+        return t.full((0, n_layers, len(moment_keys)), float("nan"))
     return t.stack(rows, dim=0)  # [num_cases, n_layers, 3]
+
+
+def _nan_safe_range(*arrays):
+    """Return (vmin, vmax) ignoring NaN. Falls back to (0,1) if everything is NaN."""
+    finite = [a[np.isfinite(a)] for a in arrays]
+    finite = [x for x in finite if x.size > 0]
+    if not finite:
+        return 0.0, 1.0
+    lo = float(min(x.min() for x in finite))
+    hi = float(max(x.max() for x in finite))
+    if lo == hi:
+        hi = lo + 1.0
+    return lo, hi
 
 
 MOMENT_KEYS = ["scores_inject", "scores_end_think", "scores_first_response"]
@@ -716,9 +770,11 @@ control_mean = t.nanmean(control_stack, dim=0).numpy()    # [L, 3]
 injected_mean = t.nanmean(injected_stack, dim=0).numpy()  # [L, 3]
 diff = injected_mean - control_mean
 
-vmin = float(min(control_mean.min(), injected_mean.min()))
-vmax = float(max(control_mean.max(), injected_mean.max()))
-dmax = float(abs(diff).max()) if diff.size else 1.0
+vmin, vmax = _nan_safe_range(control_mean, injected_mean)
+abs_diff = np.abs(diff)
+dmax = float(np.nanmax(abs_diff)) if np.isfinite(abs_diff).any() else 1.0
+if not np.isfinite(dmax) or dmax == 0:
+    dmax = 1.0
 
 fig, axes = plt.subplots(1, 3, figsize=(14, 7), sharey=True)
 
@@ -747,12 +803,11 @@ fig.savefig(HEATMAP_PATH, dpi=140)
 plt.close(fig)
 print(f"Saved layer heatmap to {HEATMAP_PATH}")
 
-# Also save the raw heatmap arrays in case we want them later.
 t.save(
     {
-        "control_mean": t.tensor(control_mean),
-        "injected_mean": t.tensor(injected_mean),
-        "diff": t.tensor(diff),
+        "control_mean": t.from_numpy(np.ascontiguousarray(control_mean)),
+        "injected_mean": t.from_numpy(np.ascontiguousarray(injected_mean)),
+        "diff": t.from_numpy(np.ascontiguousarray(diff)),
         "moment_labels": MOMENT_LABELS,
         "control_per_case": control_stack,
         "injected_per_case": injected_stack,
