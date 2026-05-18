@@ -60,6 +60,44 @@ def parse_answer(text: str) -> str | None:
     return normalize(matches[-1]) if matches else None
 
 
+def greedy_probe_from_cache(
+    model,
+    tokenizer,
+    base_past_key_values,
+    prefix_ids: t.Tensor,
+    max_new_tokens: int,
+) -> t.Tensor:
+    """Greedy probe rollout from a cached prefix context."""
+    if max_new_tokens <= 0:
+        return t.empty((1, 0), dtype=prefix_ids.dtype, device=prefix_ids.device)
+
+    with t.no_grad():
+        out = model(
+            input_ids=prefix_ids,
+            past_key_values=base_past_key_values,
+            use_cache=True,
+        )
+    probe_past = out.past_key_values
+    next_token = t.argmax(out.logits[:, -1, :], dim=-1, keepdim=True)
+    generated_tokens = [next_token]
+
+    eos_id = tokenizer.eos_token_id
+    for _ in range(max_new_tokens - 1):
+        if eos_id is not None and int(next_token.item()) == eos_id:
+            break
+        with t.no_grad():
+            out = model(
+                input_ids=next_token,
+                past_key_values=probe_past,
+                use_cache=True,
+            )
+        probe_past = out.past_key_values
+        next_token = t.argmax(out.logits[:, -1, :], dim=-1, keepdim=True)
+        generated_tokens.append(next_token)
+
+    return t.cat(generated_tokens, dim=1)
+
+
 print("Loading model...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=t.float16).to(DEVICE)
@@ -86,7 +124,7 @@ baseline_by_index = {r["index"]: r for r in baseline_correct}
 
 # Use experiment1 indices as the canonical 55-trace set, then pull full rows from baseline.
 candidate_indices = sorted({r["index"] for r in experiment1_results})
-POOL_SIZE = 3  # set to 55 for full run
+POOL_SIZE = 55
 pool_indices = [idx for idx in candidate_indices if idx in baseline_by_index][:POOL_SIZE]
 if len(pool_indices) < POOL_SIZE:
     raise ValueError(
@@ -190,18 +228,13 @@ for idx in pool_indices:
         if key in done_keys:
             continue
 
-        past_len = past_key_values[0][0].shape[2]
-        probe_attn_mask = t.ones(1, past_len + commitment_ids.shape[1], device=DEVICE, dtype=t.long)
-        with t.no_grad():
-            probe_ids = model.generate(
-                input_ids=commitment_ids,
-                past_key_values=past_key_values,
-                attention_mask=probe_attn_mask,
-                max_new_tokens=PROBE_MAX_NEW_TOKENS,
-                do_sample=False,
-                pad_token_id=tokenizer.eos_token_id,
-            )
-        probe_new = probe_ids[0, commitment_ids.shape[1] :]
+        probe_new = greedy_probe_from_cache(
+            model=model,
+            tokenizer=tokenizer,
+            base_past_key_values=past_key_values,
+            prefix_ids=commitment_ids,
+            max_new_tokens=PROBE_MAX_NEW_TOKENS,
+        )[0]
         probe_output = tokenizer.decode(probe_new, skip_special_tokens=True)
         probe_answer = parse_answer(probe_output)
         probe_correct = (
