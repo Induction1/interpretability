@@ -4,33 +4,55 @@ I'm continuing a mechanistic interpretability research project on CoT repair in 
 - /Users/michael/Documents/GitHub/interpretability/cot-edit-resistance/EXPERIMENTS.md
 - /Users/michael/Documents/GitHub/mechinterp/CLAUDE.md
 
-**State of the project:**
+**Project summary:**
 
-We have a working behavioral result. Experiment 1 injected a fake "Final Answer: 0" at the 30% mark of correct MATH-500 level 3 reasoning traces on DeepSeek-R1-Distill-Qwen-1.5B. Result: 49% repair rate, 49% accepted fake, 94.5% explicit backtracking. The model almost always notices the injection is wrong but only escapes the repetition loop half the time.
+We started with Neel Nanda's CoT edit resistance problem. The core question: when a reasoning model's chain-of-thought is corrupted mid-generation by a fake final answer, does it repair?
 
-The failure mode: the model correctly states the right answer in its reasoning, then references the injected fake answer, then cycles between the two until hitting the token limit. It knows the right answer but can't override the surface text.
+**Experiment 1 (complete):** DeepSeek-R1-Distill-Qwen-1.5B, MATH-500 level 3, 55 correct traces.
+Injected \boxed{0} at 30% of each reasoning trace, regenerated, measured repair.
+- 49% repaired, 94.5% explicit backtracking ("wait", "actually")
+- Key finding: "accepted_fake" was a mislabeled metric — 26/27 non-repair cases NEVER output \boxed{0}, they just looped until the 4096-token limit. The model is never fooled. It just can't exit the loop.
+- Real split: repaired (committed correctly) vs. timed_out (looped to limit).
 
-**What's next:**
+**Experiment 2 (complete, 196 runs):** DeepSeek-R1-Distill-Qwen-7B, MATH-500 level 3.
+Swept injection depth (0.10, 0.30, 0.70) × injection type (absurd=\boxed{0}, correct=\boxed{ground_truth}).
+Results at n=48 per condition (depths 0.10 and 0.70):
+- Absurd injection: 98% detection (explicit backtrack), 31% correction at depth 0.10, 51% at depth 0.70
+- Correct injection: ~87% repair, ~12% timeout even with right answer injected
+- Detection is depth-independent. Correction scales with how much reasoning was completed.
+- 0% accepted_fake (with fixed metric) — the model never actually commits to the wrong answer.
+Data: data/experiment2_results.json
 
-Experiment 2: white-box analysis. We want to run logit lens on the post-injection window to ask: does the correct answer stay represented in the residual stream during the repetition loop in non-repair cases? If yes, something is preventing it from reaching the surface — that's the mechanistic finding.
+**Experiment 3 (in progress, pilot 3 problems):** Commitment probe + logit lens.
+For each correct trace at depths 0.1-0.9:
+- Truncate reasoning at depth X
+- Append "\n\nFinal answer: $\boxed{" (forces model to complete the box)
+- Forward pass with output_hidden_states=True → logit lens at last reasoning token position
+- model.generate (30 tokens) → parse probe answer
+- Logit lens: for each of 28 layers, record P(correct_answer_token) at the last reasoning token position
 
-Concretely:
-- Use forward hooks on `model.model.layers[i]` to collect residual stream activations at each layer
-- Project through the unembedding matrix (logit lens) to get per-layer token probabilities
-- Focus on layers 12-20 (Zhang 2025 found these are the Reasoning-Focus Heads in R1-Qwen-1.5B)
-- Compare repair vs. non-repair cases: does the correct answer token probability differ at these layers during the post-injection window?
+Pilot finding (3 problems):
+- idx=1 (divisors of 196, gt=9): probe correct at ALL depths (0.1-0.9). Layer 26 jumps from ~0% to 99.85% for "9" — sharp phase transition in last 2 layers. Answer is computed very late in the network.
+- idx=2 (perfect cube, gt=27): correct from depth 0.2 onwards, wrong at 0.1.
+- idx=0 (\frac{14}{3}): broken ground truth in stored data (truncated to \frac{14}).
+
+Key fix applied this session: changed logit lens position from last token of input (last token of commitment prompt) to last token of the reasoning prefix. The `{` token of `$\boxed{` was giving inconsistent results because it's sensitive to what immediately precedes it.
+
+**Current state:**
+- experiment3.py is updated with the logit lens position fix. POOL_SIZE=3 for pilot.
+- Need to: wipe data/experiment3_results.json on RunPod, re-run pilot to verify the fix works, then scale to POOL_SIZE=55.
+- After that: analyze the logit lens curves — does the "commitment layer" (where correct answer probability jumps) shift with depth?
 
 **Technical setup:**
 - Repo: /Users/michael/Documents/GitHub/interpretability/cot-edit-resistance/
-- Model: DeepSeek-R1-Distill-Qwen-1.5B, fp16
-- RunPod RTX 5090 for compute (push/pull via git to sync)
-- PDM venv, `import torch as t` convention
-- Do NOT use TransformerLens (Qwen2.5 not supported)
-- Use raw HF hooks: `model.model.layers[i].register_forward_hook(fn)`
-- Data: data/experiment1_results.json has all 55 injection results with full traces
+- Model: DeepSeek-R1-Distill-Qwen-7B, fp16, transformers==4.47.0
+- RunPod RTX 4090 (24GB), push/pull via git to sync
+- `import torch as t` convention, no TransformerLens
+- Git push: git push https://TOKEN@github.com/Induction1/interpretability.git main
+- RunPod: cd /workspace/interpretability/cot-edit-resistance
 
 **Constraints:**
-- Don't start coding until we've talked through the experiment design
-- Don't re-run the lit search — README and EXPERIMENTS.md have what we need
+- Don't start coding without talking through design first
 - Token budget: no large reads or agent spawns without asking
-- Check CLAUDE.md for my background and preferences
+- Check CLAUDE.md for background and preferences
+- writeup.tex has a LaTeX summary of experiments 1-2 for lab colleagues
