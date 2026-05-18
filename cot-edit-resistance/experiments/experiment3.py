@@ -126,7 +126,7 @@ for idx in pool_indices:
 
         layers_out = []
         for li in range(n_layers):
-            h = fwd.hidden_states[li + 1][:, -1, :].float()
+            h = fwd.hidden_states[li + 1][:, -1, :]
             logits = model.lm_head(model.model.norm(h))
             probs = t.softmax(logits, dim=-1)[0]
             correct_prob = float(probs[answer_token_id].item())
