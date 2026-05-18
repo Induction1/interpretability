@@ -190,10 +190,13 @@ for idx in pool_indices:
         if key in done_keys:
             continue
 
+        past_len = past_key_values[0][0].shape[2]
+        probe_attn_mask = t.ones(1, past_len + commitment_ids.shape[1], device=DEVICE, dtype=t.long)
         with t.no_grad():
             probe_ids = model.generate(
                 input_ids=commitment_ids,
                 past_key_values=past_key_values,
+                attention_mask=probe_attn_mask,
                 max_new_tokens=PROBE_MAX_NEW_TOKENS,
                 do_sample=False,
                 pad_token_id=tokenizer.eos_token_id,
