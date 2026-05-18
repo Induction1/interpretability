@@ -65,7 +65,7 @@ else:
 MODEL_NAME     = "Qwen/Qwen3-8B"
 DEVICE         = "cuda"
 MAX_NEW_TOKENS = 350
-MAX_BEHAVIORS  = 150
+MAX_BEHAVIORS  = 30
 THINK_DEPTH    = 0.4
 OUTPUT_DIR     = Path("outputs/experiment5")
 DATA_DIR       = Path("data")
