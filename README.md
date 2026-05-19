@@ -6,6 +6,7 @@ Each subdirectory is a self-contained project with its own README and setup inst
 ## Projects
 
 - [Turpin et al. Replication — Unfaithful Chain-of-Thought](turpin-unfaithful-cot-replication/)
+- [CoT Edit Resistance — Where Does the Answer Commit?](cot-edit-resistance/)
 
 ## About
 

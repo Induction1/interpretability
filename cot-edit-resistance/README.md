@@ -1,82 +1,61 @@
 # CoT Edit Resistance
 
-**Last updated:** 2026-05-18
+Experiments on mid-generation injection into reasoning model chain-of-thought traces. Two phases: math domain (experiments 0-4) and safety domain (experiment 5).
 
-## Research Question
+Write-up: [induction1.github.io/research/cot-safety-injection](https://induction1.github.io/research/cot-safety-injection)
 
-When a reasoning model's chain-of-thought is corrupted mid-generation — by injecting a fake final answer — does the model repair back to its original answer? And what is happening internally that causes (or prevents) that repair?
+## The injection method
 
-This is an open question from Neel Nanda's research problems doc. Nobody has done the truncate-and-prepend + regeneration experiment with activation-level analysis on a distilled reasoning model.
+Take a model's reasoning trace in progress, truncate at some depth, append injected text, let the model continue generating. Measure whether it repairs back to its original answer (math) or complies with a harmful request (safety).
 
-## Key Results
+The key property: the model cannot structurally distinguish injected tokens from its own prior reasoning.
 
-**Experiment 1 — Fake answer injection at 30% depth (1.5B)**
+## Results
 
-We injected a fake `\boxed{0}` conclusion at the 30% mark of correct reasoning traces on MATH-500 level 3. DeepSeek-R1-Distill-Qwen-1.5B:
+**Experiments 1-2 — Fake answer injection (DeepSeek-R1-Distill-Qwen-7B, MATH-500)**
 
-- **Repaired to correct answer: 49.1%**
-- **Accepted fake answer: 49.1%**
-- **Explicitly backtracked ("wait", "actually"): 94.5%**
+Detection is near-perfect and depth-independent (98% explicit backtracking). Correction scales with reasoning depth completed before injection (31% at 10% depth, 51% at 70% depth). The model never accepts the fake — the failure mode is looping, not acceptance.
 
-The model almost always notices the injection is wrong. But it only escapes half the time. The failure mode is a repetition loop — the model correctly states the right answer, then references the injected text, then cycles between the two until it hits the token limit.
+**Experiments 3-4 — Commitment layer (logit lens)**
 
-**Experiment 3 — Commitment probe + logit lens (7B)**
+Layer 26 (second-to-last of 28) is the commitment layer in 84% of runs. Layer 26 probability > 0.5 predicts answer correctness with 94% precision and recall — a near-binary phase transition. Injecting hedging language ("Wait, that doesn't seem right.") before the commit point disrupts layer 26 and causes looping rather than a wrong answer.
 
-- Layer 26 is the commitment layer in 84% of runs (second-to-last of 28).
-- Layer 26 probability > 0.5 predicts answer correctness with 94% precision and recall.
-- Sharp phase transition: layers 0–24 predict noise; L25 shows semantic precursors; L26 jumps to the digit.
+**Experiment 5 — Safety CoT injection (Qwen3-8B)**
 
-**Experiment 5 — Mid-generation harmful CoT injection (Qwen3-8B)**
+Injected pro-compliance reasoning mid-think into a safety-aligned model across 24 AdvBench behaviors, three injection strengths (50 / 250 / 550 tokens). Zero genuine compliance across 72 runs. Counterintuitively, longer injections produced more decisive refusals (0 loops at 550 tokens vs. 3 at 250 tokens). The model treats injected argumentation as content to evaluate and refute, not as its own reasoning to continue from.
 
-A pivot toward safety: can you jailbreak a safety-aligned model by injecting harmful reasoning mid-generation into its chain-of-thought?
-
-## The Injection Method
-
-1. Take the model's own reasoning trace in progress
-2. Cut at the nearest sentence boundary to the target depth
-3. Append injected text (a fake conclusion, or harmful reasoning)
-4. Feed the full sequence back and let the model continue (greedy, temp=0)
-5. Measure repair/compliance rate and inspect internal activations
-
-This is a generation-time intervention — the model cannot distinguish injected tokens from its own.
-
-## File Structure
+## File structure
 
 ```
 experiments/
-  experiment0.py    — baseline traces on MATH-500 level 3
-  experiment1.py    — fake final answer injection at 30%, repair measurement
-  experiment2.py    — depth × injection-type sweep (7B)
-  experiment3.py    — commitment probe + logit lens across all reasoning depths
-  experiment4.py    — "Wait" token injection before commit
-  experiment5.py    — mid-think harmful CoT injection on Qwen3-8B (safety pivot)
-  utils.py          — shared parsing helpers
-data/
-  advbench.csv
-  baseline_traces.json
-  experiment1_results.json
-  experiment2_results.json
-  experiment3_results.json
-  experiment4_results.json
+  experiment0.py          — baseline traces, MATH-500 level 3
+  experiment1.py          — fake answer injection at 30% depth (1.5B)
+  experiment2.py          — depth x injection-type sweep (7B)
+  experiment3.py          — commitment probe + logit lens across all depths
+  experiment4.py          — hedging token injection before commit
+  experiment5.py          — harmful CoT injection on Qwen3-8B
+  test_experiment5.py     — smoke tests for experiment5 (no GPU required)
+outputs/
+  experiment5/            — injection results, refusal direction plots, heatmaps
+EXPERIMENTS.md            — full experiment log with raw numbers
+RUNPOD_SETUP.txt          — RunPod setup instructions
 ```
 
 ## Setup
 
-Python 3.11, [PDM](https://pdm-project.org/) for dependency management.
+Experiments 0-4 run locally on Apple Silicon (MPS). Experiment 5 requires a GPU with 24GB+ VRAM (tested on RunPod RTX 4090). See `RUNPOD_SETUP.txt` for remote setup instructions.
 
 ```bash
-cd cot-edit-resistance
-pdm install
+pip install "transformers==4.51.3" accelerate requests matplotlib numpy hf_transfer
+HF_HUB_ENABLE_HF_TRANSFER=1 python experiments/experiment5.py
 ```
 
-Experiments were run on a RunPod RTX 4090. Models used: DeepSeek-R1-Distill-Qwen-1.5B, DeepSeek-R1-Distill-Qwen-7B, Qwen3-8B.
+## Prior work
 
-## Prior Work
+**Lanham et al. 2023** — prompt-level mistake injection, no generation-time intervention.
 
-**Zhang 2025** — Attention analysis of R1-Qwen-1.5B. Found Reasoning-Focus Heads (layers 12-20). Did residual stream patching on synthetic tasks. Did not study regeneration.
+**H-CoT / Kuo et al. 2025 (2502.12893)** — injects harmful reasoning into the prompt before generation. We inject mid-stream during the model's own generation.
 
-**Boppana 2026** — Showed R1-Distill-1.5B does genuine reasoning on hard tasks. Motivated use of MATH over GPQA-Diamond (too hard for 1.5B).
+**CoT Hijacking / Zhao et al. 2025 (2510.26418)** — long benign prefix in the prompt passively dilutes the safety signal. Works at the prompt level, not mid-generation.
 
-**Lanham 2023** — Prompt-level mistake injection. Showed edits don't always change answers. Did not use generation-time intervention or look at mechanisms.
-
-**Chua et al. 2025 (H-CoT)** — Injected harmful reasoning into the *prompt* before generation. We inject mid-stream during generation — the model cannot distinguish injected tokens from its own.
+**Yamaguchi et al. 2025 (2507.03167)** — linear "caution" direction in DeepSeek-R1-Distill activation space during CoT generation. Closest to the mechanistic approach in experiment 5.
