@@ -17,6 +17,22 @@ __pycache__/
 *.bin
 *.safetensors
 *.gguf
+*.pt
 
 # env
 .env
+
+# reference papers
+papers/
+
+# latex writeups
+*.tex
+
+# cursor agent instructions and operational notes (machine-local)
+AGENTS.md
+EXPERIMENTS.md
+next_chat_prompt.txt
+RUNPOD_SETUP.txt
+
+# generated outputs
+outputs/

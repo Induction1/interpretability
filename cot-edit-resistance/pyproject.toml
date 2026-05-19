@@ -1,11 +1,11 @@
 [project]
 name = "cot-edit-resistance"
 version = "0.1.0"
-description = "Default template for PDM package"
+description = "Mid-generation CoT injection experiments on reasoning and safety-aligned models"
 authors = [
     {name = "Michael Gao", email = "mgao31415@gmail.com"},
 ]
-dependencies = ["torch>=2.12.0", "transformers>=5.8.1", "datasets>=4.8.5", "tqdm>=4.67.3"]
+dependencies = ["torch>=2.12.0", "transformers>=5.8.1", "datasets>=4.8.5", "tqdm>=4.67.3", "matplotlib>=3.10.9", "numpy>=2.4.5"]
 requires-python = "==3.11.*"
 readme = "README.md"
 license = {text = "MIT"}
